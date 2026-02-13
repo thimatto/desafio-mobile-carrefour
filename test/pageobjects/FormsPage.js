@@ -15,7 +15,7 @@ class FormsPage {
 
   
   // Dropdown
-  get dropdown() { return $('~Dropdown') } // às vezes é accessibility id do container
+  get dropdown() { return $('~Dropdown') } 
   get dropdownValue() { return $('~text-input') }  
 
   // Buttons
