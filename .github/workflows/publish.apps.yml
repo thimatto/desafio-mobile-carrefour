@@ -1,0 +1,211 @@
+name: Build and Publish WebdriverIO Native Demo Apps
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare_release:
+    runs-on: ubuntu-latest
+    outputs:
+      current_version: ${{ steps.get_version.outputs.version }}
+      version_changed: ${{ steps.check_version.outputs.changed }}
+      should_release: ${{ steps.check_version.outputs.should_release }}
+    steps:
+      - name: ⬇️ Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history for tags
+
+      - name: 🌲 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+
+      - name: 🧩 Install Dependencies
+        run: npm ci
+
+      - name: 📖 Get Current Version
+        id: get_version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
+
+      - name: 🔍 Check if Version Changed
+        id: check_version
+        run: |
+          CURRENT_VERSION="${{ steps.get_version.outputs.version }}"
+
+          # Check if a tag for this version already exists
+          if git rev-parse "v${CURRENT_VERSION}" >/dev/null 2>&1; then
+            echo "Tag v${CURRENT_VERSION} already exists"
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "New version detected: ${CURRENT_VERSION}"
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: ℹ️ Release Decision
+        run: |
+          if [ "${{ steps.check_version.outputs.should_release }}" == "true" ]; then
+            echo "✅ Will create release for version ${{ steps.get_version.outputs.version }}"
+          else
+            echo "⏭️  Version ${{ steps.get_version.outputs.version }} already released, skipping"
+          fi
+
+  android_build:
+    needs: prepare_release
+    if: needs.prepare_release.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⬇️ Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🧳 Cache Gradle Wrapper
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-wrapper-${{ hashFiles('**/gradle-wrapper.properties') }}
+
+      - name: 🧳 Cache Gradle Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+          key: ${{ runner.os }}-gradle-cache-${{ hashFiles('**/*.gradle*', '**/gradle.lockfile') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-cache-
+
+      - name: ☕ Setup Java and Android SDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: "zulu"
+          java-version: "17.x"
+
+      - name: 🌲 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+
+      - name: 🧩 Install Dependencies
+        run: npm ci
+
+      - name: 🏗️ Build Android Release
+        run: npm run android:release
+
+      - name: 📦 Move 🤖 Android Build
+        run: |
+          VERSION="${{ needs.prepare_release.outputs.current_version }}"
+          mv apps/release/android.wdio.native.app.v${VERSION}.apk ./android.wdio.native.app.v${VERSION}.apk
+
+      - name: 📤 Upload Android App
+        uses: actions/upload-artifact@v4
+        with:
+          name: android.wdio.native.app.v${{ needs.prepare_release.outputs.current_version }}.apk
+          path: android.wdio.native.app.v${{ needs.prepare_release.outputs.current_version }}.apk
+
+  ios_build:
+    needs: prepare_release
+    if: needs.prepare_release.outputs.should_release == 'true'
+    # for https://github.com/facebook/react-native/issues/38294
+    runs-on: macos-latest
+    steps:
+      - name: ⬇️ Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🧳 Cache Cocoapods Pods
+        uses: actions/cache@v4
+        with:
+          path: ios/Pods
+          key: ${{ runner.os }}-pods-${{ hashFiles('**/Podfile.lock') }}-20231231
+          restore-keys: |
+            ${{ runner.os }}-pods-
+
+      - name: 🌲 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+
+      - name: 🧩 Install Dependencies
+        run: npm ci
+
+      - name: 🏗️ Build iOS Release
+        run: npm run ios:release
+
+      - name: 📦 Move iOS Simulator Build
+        run: |
+          VERSION="${{ needs.prepare_release.outputs.current_version }}"
+          cp apps/release/ios.simulator.wdio.native.app.v${VERSION}.zip ./ios.simulator.wdio.native.app.v${VERSION}.zip
+
+      - name: 📤 Upload iOS App
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios.simulator.wdio.native.app.v${{ needs.prepare_release.outputs.current_version }}.zip
+          path: ios.simulator.wdio.native.app.v${{ needs.prepare_release.outputs.current_version }}.zip
+
+  finalize:
+    needs: [prepare_release, android_build, ios_build]
+    if: needs.prepare_release.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⬇️ Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🌲 Setup Git
+        run: |
+          git config --global user.email "bot@webdriver.io"
+          git config --global user.name "WebdriverIO Release Bot"
+
+      - name: 🔖 Tag New Release
+        run: |
+          VERSION="${{ needs.prepare_release.outputs.current_version }}"
+          git tag -a "v${VERSION}" -m "Release ${VERSION}"
+          git push origin "v${VERSION}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🚀 Create GitHub Release
+        id: create_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: v${{ needs.prepare_release.outputs.current_version }}
+          RELEASE_NAME: "Release ${{ needs.prepare_release.outputs.current_version }}"
+          DRAFT: true
+          PRE_RELEASE: false
+        run: |
+          chmod +x .github/scripts/create_release.sh
+          .github/scripts/create_release.sh
+
+      - name: 📥 Download Android App Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: android.wdio.native.app.v${{ needs.prepare_release.outputs.current_version }}.apk
+
+      - name: 📥 Download iOS App Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ios.simulator.wdio.native.app.v${{ needs.prepare_release.outputs.current_version }}.zip
+
+      - name: 📤 Upload Artifacts to Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          chmod +x .github/scripts/upload_artifacts.sh
+          if [ -z "$ASSET_URL" ]; then
+            echo "Error: ASSET_URL not set. Release creation may have failed."
+            exit 1
+          fi
+          .github/scripts/upload_artifacts.sh "$ASSET_URL" ${{ needs.prepare_release.outputs.current_version }} ${{ secrets.GITHUB_TOKEN }}

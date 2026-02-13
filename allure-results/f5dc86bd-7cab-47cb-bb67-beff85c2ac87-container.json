@@ -1,0 +1,1 @@
+{"uuid":"f5dc86bd-7cab-47cb-bb67-beff85c2ac87","name":"\"before each\" hook for Login - Fluxo completo","children":["c18d765f-674d-4b56-93da-aaaef0b8b7bc"],"befores":[{"status":"passed","statusDetails":{},"stage":"finished","steps":[],"attachments":[],"parameters":[],"start":1771010621831,"name":"\"before each\" hook for Login - Fluxo completo","stop":1771010623093}],"afters":[]}
