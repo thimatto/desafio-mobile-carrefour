@@ -1,107 +1,123 @@
 exports.config = {
-    runner: 'local',
+  runner: 'local',
 
-    specs: [
-        './test/specs/**/*.js'
-    ],
-    exclude: [],
+  specs: [
+    './test/specs/**/*.js'
+  ],
+  exclude: [],
 
-    maxInstances: 1,
+  maxInstances: 1,
 
-capabilities: [{
-  platformName: 'Android',
-  'appium:deviceName': 'Google Pixel 7',
-  'appium:platformVersion': '13.0',
-  'appium:automationName': 'UiAutomator2',
-  'appium:app': 'bs://d2396ccbe7626696acc102a9a7dbdc6b81c08449',
+  // ✅ BrowserStack
+  user: process.env.BROWSERSTACK_USER,
+  key: process.env.BROWSERSTACK_KEY,
+  services: ['browserstack'],
 
-  // opções do BrowserStack
-  'bstack:options': {
-    projectName: 'Carrefour Mobile',
-    buildName: `GH Actions - ${process.env.GITHUB_RUN_NUMBER || 'local'}`,
-    sessionName: 'WDIO Appium Tests',
-    debug: true,
-    networkLogs: true
-  }
-}],
+  capabilities: [
+    {
+      platformName: 'Android',
+      'appium:deviceName': 'Google Pixel 7',
+      'appium:platformVersion': '13.0',
+      'appium:automationName': 'UiAutomator2',
+      'appium:app': 'bs://d2396ccbe7626696acc102a9a7dbdc6b81c08449',
 
+      'bstack:options': {
+        projectName: 'Carrefour Mobile',
+        buildName: `GH Actions - ${process.env.GITHUB_RUN_NUMBER || 'local'}`,
+        sessionName: 'WDIO Appium Tests',
+        debug: true,
+        networkLogs: true
+      }
+    }
+  ],
 
-    logLevel: 'info',
-    bail: 0,
-    waitforTimeout: 10000,
-    connectionRetryTimeout: 120000,
-    connectionRetryCount: 3,
+  logLevel: 'info',
+  bail: 0,
+  waitforTimeout: 10000,
+  connectionRetryTimeout: 120000,
+  connectionRetryCount: 3,
 
-    // 🔑 Apenas BrowserStack
-    user: process.env.BROWSERSTACK_USERNAME,
-    key: process.env.BROWSERSTACK_ACCESS_KEY,
-    services: ['browserstack'],
+  framework: 'mocha',
 
-
-    framework: 'mocha',
-    reporters: [
+  reporters: [
     'spec',
     ['allure', {
-        outputDir: 'allure-results',
-        disableWebdriverStepsReporting: true,
-        disableWebdriverScreenshotsReporting: false,
+      outputDir: 'allure-results',
+      disableWebdriverStepsReporting: true,
+      disableWebdriverScreenshotsReporting: false,
     }],
-],
+  ],
 
-    mochaOpts: {
-        ui: 'bdd',
-        timeout: 60000
-    },
+  mochaOpts: {
+    ui: 'bdd',
+    timeout: 60000
+  },
 
-    // 🎯 Hooks para capturar screenshots de falhas e logs
-    beforeTest: async function(test) {
-        const allureHelper = require('./test/helpers/allureHelper');
-        // Adiciona informações do ambiente no primeiro teste
-        if (!global.envInfoAdded) {
-            await allureHelper.addEnvironmentInfo(this.capabilities);
-            global.envInfoAdded = true;
-        }
-    },
-
-    afterTest: async function(test, context, { passed, failed, error }) {
-        const allureHelper = require('./test/helpers/allureHelper');
-        
-        // Se o teste falhou, captura screenshot e logs
-        if (!passed) {
-            console.log('\n❌ Teste falhou - Capturando evidências...\n');
-            await allureHelper.captureScreenshotOnFailure(test.title);
-            await allureHelper.captureLogs();
-        }
-    },
-
-    onComplete: function() {
-        const { execSync } = require('child_process');
-        try {
-            console.log('\n📊 Gerando relatório Allure...\n');
-            execSync('allure generate allure-results -o allure-report --clean', { stdio: 'inherit' });
-            console.log('\n✅ Relatório gerado em: ./allure-report\n');
-        } catch (e) {
-            console.log('Aviso: Não foi possível gerar relatório Allure');
-        }
-    },
-    afterTest: async function (test, context, { error, passed }) {
-
-    // Se o teste falhou
-    if (!passed) {
-
-        // tira screenshot
-        const screenshot = await browser.takeScreenshot();
-
-        // adiciona no relatório Allure
-        const allure = require('@wdio/allure-reporter').default;
-        allure.addAttachment(
-            'Screenshot on failure',
-            Buffer.from(screenshot, 'base64'),
-            'image/png'
-        );
+  /**
+   * ✅ Adiciona info de ambiente uma vez (se seu helper existir)
+   */
+  beforeTest: async function () {
+    try {
+      const allureHelper = require('./test/helpers/allureHelper');
+      if (!global.envInfoAdded && allureHelper?.addEnvironmentInfo) {
+        await allureHelper.addEnvironmentInfo(this.capabilities);
+        global.envInfoAdded = true;
+      }
+    } catch (e) {
+      // se não tiver helper, segue sem quebrar
     }
-},
+  },
 
+  /**
+   * ✅ Um único afterTest (unificado)
+   * - tira screenshot quando falhar
+   * - anexa no Allure
+   * - (opcional) chama seu helper para screenshot/logs
+   */
+  afterTest: async function (test, context, { passed }) {
+    if (passed) return;
 
-    
+    console.log('\n❌ Teste falhou - Capturando evidências...\n');
+
+    // 1) Screenshot e anexar no Allure
+    try {
+      const screenshotBase64 = await browser.takeScreenshot();
+      const allure = require('@wdio/allure-reporter').default;
+      allure.addAttachment(
+        `Screenshot - ${test.title}`,
+        Buffer.from(screenshotBase64, 'base64'),
+        'image/png'
+      );
+    } catch (e) {
+      console.log('Aviso: não consegui anexar screenshot no Allure:', e.message);
+    }
+
+    // 2) Se você tiver helper, usa ele também (logs etc.)
+    try {
+      const allureHelper = require('./test/helpers/allureHelper');
+      if (allureHelper?.captureScreenshotOnFailure) {
+        await allureHelper.captureScreenshotOnFailure(test.title);
+      }
+      if (allureHelper?.captureLogs) {
+        await allureHelper.captureLogs();
+      }
+    } catch (e) {
+      // se não tiver helper, segue sem quebrar
+    }
+  },
+
+  /**
+   * ✅ Gera o relatório no final
+   * (no GitHub Actions você pode preferir gerar no workflow, mas isso aqui funciona também)
+   */
+  onComplete: function () {
+    const { execSync } = require('child_process');
+    try {
+      console.log('\n📊 Gerando relatório Allure...\n');
+      execSync('npx allure-commandline generate allure-results -o allure-report --clean', { stdio: 'inherit' });
+      console.log('\n✅ Relatório gerado em: ./allure-report\n');
+    } catch (e) {
+      console.log('Aviso: Não foi possível gerar relatório Allure');
+    }
+  },
 };
