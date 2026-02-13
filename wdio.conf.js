@@ -8,15 +8,23 @@ exports.config = {
 
     maxInstances: 1,
 
-    capabilities: [
-        {
-            platformName: 'Android',
-            'appium:deviceName': 'Google Pixel 7',
-            'appium:platformVersion': '13.0',
-            'appium:automationName': 'UiAutomator2',
-            'appium:app': 'bs://d2396ccbe7626696acc102a9a7dbdc6b81c08449'
-        }
-    ],
+capabilities: [{
+  platformName: 'Android',
+  'appium:deviceName': 'Google Pixel 7',
+  'appium:platformVersion': '13.0',
+  'appium:automationName': 'UiAutomator2',
+  'appium:app': 'bs://d2396ccbe7626696acc102a9a7dbdc6b81c08449',
+
+  // opções do BrowserStack
+  'bstack:options': {
+    projectName: 'Carrefour Mobile',
+    buildName: `GH Actions - ${process.env.GITHUB_RUN_NUMBER || 'local'}`,
+    sessionName: 'WDIO Appium Tests',
+    debug: true,
+    networkLogs: true
+  }
+}],
+
 
     logLevel: 'info',
     bail: 0,
