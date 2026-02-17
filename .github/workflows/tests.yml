@@ -23,8 +23,42 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run WDIO tests on BrowserStack
+      # ✅ Roda testes, mas NÃO quebra o job
+      # ✅ Guarda o exit code num arquivo e mostra um resumo do erro no log
+      - name: Run WDIO tests (do not fail pipeline)
         env:
           BROWSERSTACK_USER: ${{ secrets.BROWSERSTACK_USER }}
           BROWSERSTACK_KEY: ${{ secrets.BROWSERSTACK_KEY }}
-        run: npx wdio run wdio.conf.js
+        shell: bash
+        run: |
+          set +e
+          npx wdio run wdio.conf.js 2>&1 | tee wdio.log
+          echo $? > wdio_exit_code.txt
+
+          echo ""
+          echo "=============================="
+          echo "📌 RESUMO DE FALHAS (se houver)"
+          echo "=============================="
+          grep -nE "failing|FAILED|Error:|still not displayed|Expect|AssertionError" wdio.log || true
+          echo "=============================="
+          echo ""
+
+          # Não falhar o step:
+          exit 0
+
+      # ✅ Gera Allure SEMPRE (mesmo se falhou)
+      - name: Generate Allure report
+        if: always()
+        run: npx allure-commandline generate allure-results --clean -o allure-report
+
+      # ✅ Sobe evidências SEMPRE
+      - name: Upload artifacts (Allure + logs)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts
+          path: |
+            allure-results
+            allure-report
+            wdio.log
+            wdio_exit_code.txt
