@@ -4,14 +4,18 @@ exports.config = {
   specs: [
     './test/specs/**/*.js'
   ],
-  exclude: [],
 
   maxInstances: 1,
 
-  // ✅ BrowserStack
+  // 🔐 Credenciais
   user: process.env.BROWSERSTACK_USER,
   key: process.env.BROWSERSTACK_KEY,
-  services: ['browserstack'],
+
+  // 🌐 Conexão direta com BrowserStack (SEM service)
+  hostname: 'hub-cloud.browserstack.com',
+  port: 443,
+  protocol: 'https',
+  path: '/wd/hub',
 
   capabilities: [
     {
@@ -53,71 +57,28 @@ exports.config = {
     timeout: 60000
   },
 
-  /**
-   * ✅ Adiciona info de ambiente uma vez (se seu helper existir)
-   */
-  beforeTest: async function () {
-    try {
-      const allureHelper = require('./test/helpers/allureHelper');
-      if (!global.envInfoAdded && allureHelper?.addEnvironmentInfo) {
-        await allureHelper.addEnvironmentInfo(this.capabilities);
-        global.envInfoAdded = true;
-      }
-    } catch (e) {
-      // se não tiver helper, segue sem quebrar
-    }
-  },
-
-  /**
-   * ✅ Um único afterTest (unificado)
-   * - tira screenshot quando falhar
-   * - anexa no Allure
-   * - (opcional) chama seu helper para screenshot/logs
-   */
   afterTest: async function (test, context, { passed }) {
     if (passed) return;
 
-    console.log('\n❌ Teste falhou - Capturando evidências...\n');
+    const screenshotBase64 = await browser.takeScreenshot();
+    const allure = require('@wdio/allure-reporter').default;
 
-    // 1) Screenshot e anexar no Allure
-    try {
-      const screenshotBase64 = await browser.takeScreenshot();
-      const allure = require('@wdio/allure-reporter').default;
-      allure.addAttachment(
-        `Screenshot - ${test.title}`,
-        Buffer.from(screenshotBase64, 'base64'),
-        'image/png'
-      );
-    } catch (e) {
-      console.log('Aviso: não consegui anexar screenshot no Allure:', e.message);
-    }
-
-    // 2) Se você tiver helper, usa ele também (logs etc.)
-    try {
-      const allureHelper = require('./test/helpers/allureHelper');
-      if (allureHelper?.captureScreenshotOnFailure) {
-        await allureHelper.captureScreenshotOnFailure(test.title);
-      }
-      if (allureHelper?.captureLogs) {
-        await allureHelper.captureLogs();
-      }
-    } catch (e) {
-      // se não tiver helper, segue sem quebrar
-    }
+    allure.addAttachment(
+      `Screenshot - ${test.title}`,
+      Buffer.from(screenshotBase64, 'base64'),
+      'image/png'
+    );
   },
 
-  /**
-   * ✅ Gera o relatório no final
-   * (no GitHub Actions você pode preferir gerar no workflow, mas isso aqui funciona também)
-   */
   onComplete: function () {
     const { execSync } = require('child_process');
     try {
-      console.log('\n📊 Gerando relatório Allure...\n');
-      execSync('npx allure-commandline generate allure-results -o allure-report --clean', { stdio: 'inherit' });
-      console.log('\n✅ Relatório gerado em: ./allure-report\n');
+      execSync(
+        'npx allure-commandline generate allure-results -o allure-report --clean',
+        { stdio: 'inherit' }
+      );
     } catch (e) {
-      console.log('Aviso: Não foi possível gerar relatório Allure');
+      console.log('Não foi possível gerar relatório Allure');
     }
   },
 };
